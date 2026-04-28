@@ -5,7 +5,11 @@ Falls back to template-based recommendations when API key is unavailable.
 """
 
 import os
+import streamlit as st
+from dotenv import load_dotenv
 from typing import Optional, TYPE_CHECKING
+
+load_dotenv()
 
 if TYPE_CHECKING:
     from utils.fairness_engine import FairnessReport
@@ -18,7 +22,7 @@ class GeminiAdvisor:
     """
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY", "")
+        self.api_key = api_key or os.getenv("GOOGLE_API_KEY","")
         self.is_configured = False
         self._model = None
 
@@ -31,16 +35,15 @@ class GeminiAdvisor:
             genai.configure(api_key=self.api_key)
             self._model = genai.GenerativeModel("gemini-1.5-flash")
             self.is_configured = True
-        except Exception:
+        except Exception as e:
+            print("Gemini init error:", e)
             self.is_configured = False
 
     def generate_fairness_recommendations(
-        self,
-        report: "FairnessReport",
-        user_question: Optional[str] = None,
-    ) -> dict:
-        if self.is_configured and self._model:
-            return self._call_gemini(report, user_question)
+    self,
+    report,
+    user_question=None
+    ):
         return self._template_response(report, user_question)
 
     # ------------------------------------------------------------------

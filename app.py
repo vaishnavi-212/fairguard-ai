@@ -93,6 +93,22 @@ if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
 
+        # ---- Data Validation ----
+        if df.empty:
+            st.error("Uploaded dataset is empty.")
+            st.stop()
+
+        required_cols = [protected_attr, outcome_col]
+        missing = [c for c in required_cols if c not in df.columns]
+
+        if missing:
+            st.error(f"Missing required columns: {missing}")
+            st.stop()
+
+        if df[protected_attr].nunique() < 2:
+            st.warning("Need at least two protected groups for fairness analysis.")
+            st.stop()
+
         st.subheader("📊 Dataset Preview")
         col1, col2 = st.columns([2, 1])
         with col1:
@@ -140,11 +156,16 @@ if uploaded_file:
                 if doc_id:
                     st.caption(f"📦 Audit saved to Firebase: {doc_id[:8]}...")
 
+            # ===== SHOW RESULTS FROM SESSION STATE =====
+            if st.session_state.fairness_report is not None:
+                report = st.session_state.fairness_report
+                fw = st.session_state.firewall_result
+                agent_results = st.session_state.agent_results
+
                 # ===== BIAS FIREWALL SECTION =====
                 st.divider()
                 st.subheader("🔥 Bias Firewall - Pre-Deployment Gate")
 
-                fw = st.session_state.firewall_result
                 if fw.decision == FirewallDecision.PASS:
                     st.markdown(f"""
                     <div class="firewall-pass">
@@ -190,7 +211,6 @@ if uploaded_file:
                 st.divider()
                 st.subheader("📈 Impact Simulation - Measurable Business Value")
 
-                report = st.session_state.fairness_report
                 di = report.detailed_metrics.get('disparate_impact', {})
 
                 if di.get('is_compliant'):
@@ -223,9 +243,45 @@ if uploaded_file:
                 """)
 
                 # ===== TABS =====
-                tabs = st.tabs(["📈 Dashboard", "🤖 Agent Analysis", "🔍 Detailed Metrics", "💬 Gemini Advisor", "📋 Export Report","📜 Audit History"])
+                st.markdown("""
+                <style>
+                div[role="radiogroup"] > label {
+                    display: inline-block;
+                    padding: 0.4rem 1rem;
+                    margin: 0 0.2rem 0.5rem 0;
+                    border-radius: 2rem;
+                    border: 1.5px solid #667eea;
+                    cursor: pointer;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    color: #667eea;
+                    background: white;
+                    transition: all 0.2s;
+                }
+                div[role="radiogroup"] > label:has(input:checked) {
+                    background: #667eea;
+                    color: white;
+                }
+                div[role="radiogroup"] { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+                </style>
+                """, unsafe_allow_html=True)
 
-                with tabs[0]:
+                if "active_tab" not in st.session_state:
+                    st.session_state.active_tab = "📈 Dashboard"
+
+                active_tab = st.radio(
+                    "Navigation",
+                    ["📈 Dashboard", "🤖 Agent Analysis", "🔍 Detailed Metrics", "💬 Gemini Advisor", "📋 Export Report", "📜 Audit History"],
+                    index=["📈 Dashboard", "🤖 Agent Analysis", "🔍 Detailed Metrics", "💬 Gemini Advisor", "📋 Export Report", "📜 Audit History"].index(st.session_state.active_tab),
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key="tab_radio"
+                )
+                st.session_state.active_tab = active_tab
+                st.divider()
+
+
+                if active_tab == "📈 Dashboard":
                     st.subheader("Fairness Overview")
 
                     cols = st.columns(4)
@@ -294,7 +350,7 @@ if uploaded_file:
                     for rec in report.recommendations:
                         st.info(rec)
 
-                with tabs[1]:
+                if active_tab == "🤖 Agent Analysis":
                     st.subheader("🤖 Multi-Agent Governance Analysis")
 
                     if agent_results:
@@ -324,7 +380,7 @@ if uploaded_file:
                             </div>
                             """, unsafe_allow_html=True)
 
-                with tabs[2]:
+                if active_tab == "🔍 Detailed Metrics":
                     st.subheader("📊 Statistical Fairness Metrics")
                     metrics_data = report.detailed_metrics
 
@@ -363,7 +419,7 @@ if uploaded_file:
                                 st.dataframe(inter_df)
                             st.metric("Max Disparity", f"{inter.get('max_disparity', 0):.3f}")
 
-                with tabs[3]:
+                if active_tab == "💬 Gemini Advisor":
                     st.subheader("💬 Gemini Fairness Advisor")
                     advisor = st.session_state.gemini_advisor
 
@@ -372,27 +428,34 @@ if uploaded_file:
                     else:
                         st.success("✅ Gemini 1.5 Flash connected")
 
-                    if st.button("🔄 Generate AI Recommendations", type="primary"):
-                        with st.spinner("Consulting Gemini..."):
+                    if st.button("🧠 Generate AI Recommendations"):
+                        with st.spinner("Generating recommendations..."):
                             result = advisor.generate_fairness_recommendations(report)
-                            st.session_state.gemini_result = result
+                            st.session_state["gemini_result"] = result["response"]
+                            st.session_state["gemini_source"] = result.get("source", "")
 
-                    if 'gemini_result' in st.session_state:
-                        result = st.session_state.gemini_result
-                        st.caption(f"Source: {result['source']}")
-                        st.markdown(result['response'])
+                    if "gemini_result" in st.session_state:
+                        st.subheader("📋 AI Recommendations")
+                        if st.session_state.get("gemini_source"):
+                            st.caption(f"Source: {st.session_state['gemini_source']}")
+                        st.markdown(st.session_state["gemini_result"])
 
                     st.divider()
                     st.subheader("💭 Ask a Question")
                     user_q = st.text_input("Ask about fairness, legal compliance, or remediation:",
                                            placeholder="e.g., What are the legal risks if we don't fix this?")
 
-                    if user_q:
-                        with st.spinner("Analyzing..."):
-                            result = advisor.generate_fairness_recommendations(report, user_q)
-                            st.markdown(f"**🤖 Gemini:** {result['response']}")
+                    if st.button("Ask", key="ask_btn"):
+                        if user_q:
+                            with st.spinner("Analyzing..."):
+                                result = advisor.generate_fairness_recommendations(report, user_q)
+                                st.session_state.qa_result = result["response"]
 
-                with tabs[4]:
+                    if 'qa_result' in st.session_state:
+                        st.markdown("**🤖 Answer:**")
+                        st.markdown(st.session_state.qa_result)
+
+                if active_tab == "📋 Export Report":
                     st.subheader("📋 Export Audit Report")
                     report_dict = asdict(report)
 
@@ -421,7 +484,7 @@ if uploaded_file:
                     st.subheader("Report Preview")
                     st.json(report_dict)
 
-                with tabs[5]:
+                if active_tab == "📜 Audit History":
                     st.subheader("📜 Audit History — Firebase Firestore")
 
                     firebase = st.session_state.firebase
