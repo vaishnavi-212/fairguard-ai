@@ -33,7 +33,7 @@ class GeminiAdvisor:
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
-            self._model = genai.GenerativeModel("gemini-1.5-flash")
+            self._model = genai.GenerativeModel("gemini-1.5-flash-latest")
             self.is_configured = True
         except Exception as e:
             print("Gemini init error:", e)
