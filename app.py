@@ -17,6 +17,7 @@ import os
 import json
 from dataclasses import asdict
 from datetime import datetime
+from utils.firebase_manager import FirebaseManager
 
 
 
@@ -49,6 +50,8 @@ if 'gemini_advisor' not in st.session_state:
     st.session_state.gemini_advisor = GeminiAdvisor()
 if 'audit_history' not in st.session_state:
     st.session_state.audit_history = []
+if "firebase" not in st.session_state:
+    st.session_state.firebase = FirebaseManager()
 
 st.markdown('<p class="main-header">🛡️ FairGuard AI</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Multi-Agent Fairness Governance Copilot | Bias Firewall | Google Gemini</p>', unsafe_allow_html=True)
@@ -131,6 +134,11 @@ if uploaded_file:
                     })
 
                 st.success("✅ Analysis Complete!")
+
+                doc_id = st.session_state.firebase.save_audit(report, fw_result)
+
+                if doc_id:
+                    st.caption(f"📦 Audit saved to Firebase: {doc_id[:8]}...")
 
                 # ===== BIAS FIREWALL SECTION =====
                 st.divider()
@@ -215,7 +223,7 @@ if uploaded_file:
                 """)
 
                 # ===== TABS =====
-                tabs = st.tabs(["📈 Dashboard", "🤖 Agent Analysis", "🔍 Detailed Metrics", "💬 Gemini Advisor", "📋 Export Report"])
+                tabs = st.tabs(["📈 Dashboard", "🤖 Agent Analysis", "🔍 Detailed Metrics", "💬 Gemini Advisor", "📋 Export Report","📜 Audit History"])
 
                 with tabs[0]:
                     st.subheader("Fairness Overview")
@@ -412,6 +420,50 @@ if uploaded_file:
 
                     st.subheader("Report Preview")
                     st.json(report_dict)
+
+                with tabs[5]:
+                    st.subheader("📜 Audit History — Firebase Firestore")
+
+                    firebase = st.session_state.firebase
+
+                    if not firebase.is_configured:
+                        st.warning("Firebase not configured.")
+
+                    else:
+                        st.success("Connected to Firestore")
+
+                        trend = firebase.get_trend_data()
+
+                        if trend:
+                            c1,c2,c3 = st.columns(3)
+
+                            c1.metric("Total Audits",trend["total_audits"])
+                            c2.metric("Avg Score",f"{trend['avg_score']}%")
+                            c3.metric("Pass Rate",f"{trend['pass_rate']}%")
+
+                            trend_df = pd.DataFrame({
+                                "Audit": range(1,len(trend["scores"])+1),
+                                "Fairness Score": trend["scores"]
+                            })
+
+                            fig = px.line(
+                                trend_df,
+                                x="Audit",
+                                y="Fairness Score",
+                                markers=True,
+                                title="Fairness Trend"
+                            )
+
+                            st.plotly_chart(fig,use_container_width=True)
+
+                        history = firebase.get_audit_history()
+
+                        if history:
+                            for audit in history:
+                                with st.expander(
+                                    f"{audit['timestamp'][:19]} | Score {audit['scores']['overall']}%"
+                                ):
+                                    st.json(audit)
 
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
